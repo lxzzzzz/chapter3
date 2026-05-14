@@ -97,6 +97,7 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
         tb_log = SummaryWriter(log_dir=str(eval_output_dir / ('tensorboard_%s' % cfg.DATA_CONFIG.DATA_SPLIT['test'])))
     total_time = 0
     first_eval = True
+    evaluated_count = 0
 
     while True:
         # check whether there is checkpoint which is not evaluated
@@ -137,6 +138,9 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
         with open(ckpt_record_file, 'a') as f:
             print('%s' % cur_epoch_id, file=f)
         logger.info('Epoch %s has been evaluated' % cur_epoch_id)
+        evaluated_count += 1
+        if args.num_epochs_to_eval > 0 and evaluated_count >= args.num_epochs_to_eval:
+            break
 
 
 def main():
