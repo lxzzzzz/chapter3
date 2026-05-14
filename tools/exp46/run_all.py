@@ -42,7 +42,15 @@ def result_complete(table, row):
     row_dir = EXP_DIR / table / row
     if table == '4-21':
         return (row_dir / 'metrics.json').exists()
-    return all((row_dir / name).exists() for name in ('metrics.json', 'eval_summary.txt', 'table_values.json'))
+    if not all((row_dir / name).exists() for name in ('metrics.json', 'eval_summary.txt', 'table_values.json')):
+        return False
+    if table == '4-12':
+        try:
+            with open(row_dir / 'metrics.json', 'r') as f:
+                return 'det2d_map_0.5' in json.load(f)
+        except Exception:
+            return False
+    return True
 
 
 def skip_command(name, status_path):

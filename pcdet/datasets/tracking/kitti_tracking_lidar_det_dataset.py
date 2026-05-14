@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 from skimage import io
 
-from ...utils import calibration_kitti, common_utils
+from ...utils import box_utils, calibration_kitti, common_utils
 from ..dataset import DatasetTemplate
 
 
@@ -71,6 +71,57 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
         calib_dict = info['calib']
         return calibration_kitti.Calibration(calib_dict)
 
+    @staticmethod
+    def generate_prediction_dicts(batch_dict, pred_dicts, class_names, output_path=None):
+        def get_template_prediction(num_samples):
+            return {
+                'name': np.zeros(num_samples), 'score': np.zeros(num_samples),
+                'boxes_lidar': np.zeros([num_samples, 7]), 'pred_labels': np.zeros(num_samples),
+                'bbox': np.zeros([num_samples, 4]), 'dimensions': np.zeros([num_samples, 3]),
+                'location': np.zeros([num_samples, 3]), 'rotation_y': np.zeros(num_samples),
+                'alpha': np.zeros(num_samples),
+            }
+
+        def generate_single_sample_dict(batch_index, box_dict):
+            pred_scores = box_dict['pred_scores'].cpu().numpy()
+            pred_boxes = box_dict['pred_boxes'].cpu().numpy()
+            pred_labels = box_dict['pred_labels'].cpu().numpy()
+            pred_dict = get_template_prediction(pred_scores.shape[0])
+            if pred_scores.shape[0] == 0:
+                return pred_dict
+
+            pred_dict['name'] = np.array(class_names)[pred_labels - 1]
+            pred_dict['score'] = pred_scores
+            pred_dict['boxes_lidar'] = pred_boxes
+            pred_dict['pred_labels'] = pred_labels
+
+            if 'calib' in batch_dict:
+                calib = batch_dict['calib'][batch_index]
+                image_shape = None
+                if 'image_shape' in batch_dict:
+                    cur_shape = batch_dict['image_shape'][batch_index]
+                    image_shape = cur_shape.cpu().numpy() if hasattr(cur_shape, 'cpu') else cur_shape
+                pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes[:, :7], calib)
+                pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
+                    pred_boxes_camera, calib, image_shape=image_shape
+                )
+                pred_dict['bbox'] = pred_boxes_img
+                pred_dict['dimensions'] = pred_boxes_camera[:, 3:6]
+                pred_dict['location'] = pred_boxes_camera[:, 0:3]
+                pred_dict['rotation_y'] = pred_boxes_camera[:, 6]
+                pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
+
+            return pred_dict
+
+        annos = []
+        for index, box_dict in enumerate(pred_dicts):
+            single_pred_dict = generate_single_sample_dict(index, box_dict)
+            single_pred_dict['frame_id'] = batch_dict['frame_id'][index]
+            if 'metadata' in batch_dict:
+                single_pred_dict['metadata'] = batch_dict['metadata'][index]
+            annos.append(single_pred_dict)
+        return annos
+
     def __getitem__(self, index):
         if self._merge_all_iters_to_one_epoch:
             index = index % len(self.det_infos)
@@ -129,6 +180,7 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
             return 'No ground-truth boxes for evaluation', {}
 
         from ..kitti import kitti_utils
+        from ..kitti.det2d_eval_utils import eval_det2d_map50, has_valid_det2d
         from ..kitti.distance_eval_utils import add_distance_eval
         from ..kitti.kitti_object_eval_python import eval as kitti_eval
 
@@ -137,6 +189,12 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
         for anno in eval_gt_annos:
             anno['name'] = self._remap_names(anno['name'])
 
+        if has_valid_det2d(eval_det_annos):
+            det2d_gt_annos = copy.deepcopy(eval_gt_annos)
+            det2d_result_str, det2d_dict = eval_det2d_map50(det2d_gt_annos, eval_det_annos, class_names)
+        else:
+            det2d_result_str, det2d_dict = '', {}
+
         kitti_utils.transform_annotations_to_kitti_format(eval_det_annos, map_name_to_kitti=self.map_class_to_kitti)
         kitti_utils.transform_annotations_to_kitti_format(eval_gt_annos, map_name_to_kitti=self.map_class_to_kitti)
 
@@ -144,6 +202,9 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(
             gt_annos=eval_gt_annos, dt_annos=eval_det_annos, current_classes=kitti_class_names
         )
+        if det2d_result_str:
+            ap_result_str += '\n' + det2d_result_str
+            ap_dict.update(det2d_dict)
         ap_result_str, ap_dict = add_distance_eval(
             ap_result_str=ap_result_str,
             ap_dict=ap_dict,

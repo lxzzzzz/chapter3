@@ -366,6 +366,7 @@ class KittiDataset(DatasetTemplate):
         if 'annos' not in self.kitti_infos[0].keys():
             return None, {}
 
+        from .det2d_eval_utils import eval_det2d_map50, has_valid_det2d
         from .distance_eval_utils import add_distance_eval
         from .kitti_object_eval_python import eval as kitti_eval
         import copy
@@ -374,6 +375,10 @@ class KittiDataset(DatasetTemplate):
         eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.kitti_infos]
 
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
+        if has_valid_det2d(eval_det_annos):
+            det2d_result_str, det2d_dict = eval_det2d_map50(eval_gt_annos, eval_det_annos, class_names)
+            ap_result_str += '\n' + det2d_result_str
+            ap_dict.update(det2d_dict)
         ap_result_str, ap_dict = add_distance_eval(
             ap_result_str=ap_result_str,
             ap_dict=ap_dict,

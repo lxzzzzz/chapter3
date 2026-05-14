@@ -442,7 +442,7 @@ def _parse_ap_blocks(text):
             summary_lines.append(line)
             continue
 
-        if line.startswith('=') or 'Distance-based Evaluation' in line:
+        if line.startswith('=') or 'Distance-based Evaluation' in line or '2D AP@0.50' in line or '2D mAP@0.50' in line:
             summary_lines.append(line)
 
     return blocks, '\n'.join(summary_lines).strip() + '\n'
@@ -500,6 +500,11 @@ def parse_eval_log(log_path, dataset=None):
     text = log_path.read_text(errors='ignore')
     for key, value in re.findall(r'(recall_(?:roi|rcnn)_[0-9.]+):\s+([0-9.]+)', text):
         metrics[key] = float(value)
+    det2d_match = re.findall(r'2D mAP@0\.50:\s+([0-9.]+)', text)
+    if det2d_match:
+        metrics['det2d_map_0.5'] = float(det2d_match[-1])
+    for cls_name, value in re.findall(r'(Car|Pedestrian|Cyclist)\s+2D AP@0\.50:\s+([0-9.]+)', text):
+        metrics[f'det2d_{cls_name.lower()}_ap_0.5'] = float(value)
     blocks, summary_text = _parse_ap_blocks(text)
     class_names = dataset_specs()[dataset].class_names if dataset else sorted(blocks.get('overall', {}).keys())
     table_values = _build_table_values(blocks, class_names)
@@ -577,6 +582,8 @@ def table_columns(table, rows):
         'dataset', 'epochs',
         'ap_3d', 'ap_0_40', 'ap_40_80', 'ap_80_120',
     ])
+    if table == '4-12' and any(row.get('det2d_map_0.5') is not None for row in rows):
+        columns.append('det2d_map_0.5')
     class_columns = [
         'car_ap_3d', 'pedestrian_ap_3d', 'cyclist_ap_3d',
         'car_ap_0_40', 'car_ap_40_80', 'car_ap_80_120',
