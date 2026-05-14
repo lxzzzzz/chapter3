@@ -23,7 +23,6 @@ COMPARE_TABLES = [
     ('4-17', 'mths', 'main'),
     ('4-18', 'dair', 'main'),
     ('4-19', 'v2x_real', 'main'),
-    ('4-20', 'mths', 'class_ap'),
 ]
 
 PROFILE_ROWS = ['voxelnext', 'v43', 'v43_v45', 'det2d', 'full']
