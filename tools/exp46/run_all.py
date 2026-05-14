@@ -86,8 +86,6 @@ def collect_table(table, log_path, status_path, continue_on_error):
     print(f'\n[{now()}] START {name}', flush=True)
     proc = subprocess.run(cmd, cwd=ROOT_DIR, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print(proc.stdout, end='', flush=True)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(proc.stdout)
     with open(log_path, 'a') as log_file:
         log_file.write(f'\n[{now()}] START {name}\n$ {" ".join(cmd)}\n')
         log_file.write(proc.stdout)

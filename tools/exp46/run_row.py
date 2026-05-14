@@ -14,10 +14,14 @@ def main():
     args = parser.parse_args()
 
     variant = ROW_VARIANTS[args.row]
-    cfg_path = write_cfg(variant, args.dataset, args.epochs, f'{args.table}_{args.row}_{args.dataset}')
+    cfg_path = write_cfg(
+        variant, args.dataset, args.epochs,
+        f'{args.table}_{args.row}_{args.dataset}',
+        row=args.row,
+    )
     start = time.time()
     cmd = run_train(cfg_path, args.table, args.row, args.epochs, workers=args.workers)
-    metrics = parse_eval_log(latest_eval_log())
+    metrics = parse_eval_log(latest_eval_log(), dataset=args.dataset)
     metrics.update({
         'table': args.table,
         'row': args.row,

@@ -129,6 +129,7 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
             return 'No ground-truth boxes for evaluation', {}
 
         from ..kitti import kitti_utils
+        from ..kitti.distance_eval_utils import add_distance_eval
         from ..kitti.kitti_object_eval_python import eval as kitti_eval
 
         eval_det_annos = copy.deepcopy(det_annos)
@@ -142,5 +143,13 @@ class KittiTrackingLidarDetDataset(DatasetTemplate):
         kitti_class_names = [self.map_class_to_kitti[name] for name in class_names]
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(
             gt_annos=eval_gt_annos, dt_annos=eval_det_annos, current_classes=kitti_class_names
+        )
+        ap_result_str, ap_dict = add_distance_eval(
+            ap_result_str=ap_result_str,
+            ap_dict=ap_dict,
+            eval_gt_annos=eval_gt_annos,
+            eval_det_annos=eval_det_annos,
+            class_names=kitti_class_names,
+            kitti_eval=kitti_eval,
         )
         return ap_result_str, ap_dict

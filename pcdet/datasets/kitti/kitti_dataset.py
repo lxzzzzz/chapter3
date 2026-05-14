@@ -366,71 +366,22 @@ class KittiDataset(DatasetTemplate):
         if 'annos' not in self.kitti_infos[0].keys():
             return None, {}
 
+        from .distance_eval_utils import add_distance_eval
         from .kitti_object_eval_python import eval as kitti_eval
         import copy
-        import numpy as np
 
         eval_det_annos = copy.deepcopy(det_annos)
         eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.kitti_infos]
 
-        # =======================================================
-        # 1. 常规全局评测 (0-200m 整体 AP)
-        # =======================================================
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
-
-        # =======================================================
-        # 2. 创新点验证：分段距离评测 (Distance-based Evaluation)
-        # =======================================================
-        dist_ranges = [(0, 50), (50, 100), (100, 200)]
-        
-        ap_result_str += "\n\n" + "="*60 + "\n"
-        ap_result_str += " Distance-based Evaluation (Ablation Study) \n"
-        ap_result_str += "="*60 + "\n"
-
-        for min_dist, max_dist in dist_ranges:
-            ap_result_str += f"\n--- Distance Range: {min_dist}m to {max_dist}m ---\n"
-            
-            cur_det_annos = []
-            cur_gt_annos = []
-            
-            for i in range(len(eval_det_annos)):
-                # ---- 处理预测框 (Det) ----
-                det = copy.deepcopy(eval_det_annos[i])
-                if len(det['name']) > 0:
-                    loc = det['location']
-                    # 计算 BEV 平面距离 (KITTI相机坐标系下, x为横向, z为纵向深度)
-                    dist = np.sqrt(loc[:, 0]**2 + loc[:, 2]**2)
-                    mask = (dist >= min_dist) & (dist < max_dist)
-                    
-                    # 严格过滤掉不在当前距离区间内的预测框
-                    for k in det.keys():
-                        if isinstance(det[k], np.ndarray) and len(det[k]) == len(mask):
-                            det[k] = det[k][mask]
-                cur_det_annos.append(det)
-                
-                # ---- 处理真实框 (GT) ----
-                gt = copy.deepcopy(eval_gt_annos[i])
-                if len(gt['name']) > 0:
-                    loc = gt['location']
-                    dist = np.sqrt(loc[:, 0]**2 + loc[:, 2]**2)
-                    mask = (dist >= min_dist) & (dist < max_dist)
-                    
-                    # 【核心评测技巧】：
-                    # 不在区间内的 GT 框不要直接删除！
-                    # 必须将它们的类别修改为 'DontCare'。
-                    # 这样如果模型在区间边缘预测稍微偏了一点，匹配到了区间外的物体，
-                    # 官方代码会把它当做 DontCare 忽略，而不会冤枉模型给它算作 False Positive。
-                    gt['name'] = np.where(mask, gt['name'], 'DontCare')
-                cur_gt_annos.append(gt)
-                
-            # 调用官方评测计算该区间的 AP
-            dist_result_str, dist_dict = kitti_eval.get_official_eval_result(cur_gt_annos, cur_det_annos, class_names)
-            ap_result_str += dist_result_str
-            
-            # 将分段指标加入到总字典中 (附带前缀，方便查看 Tensorboard)
-            for k, v in dist_dict.items():
-                ap_dict[f'Dist_{min_dist}_{max_dist}_{k}'] = v
-                
+        ap_result_str, ap_dict = add_distance_eval(
+            ap_result_str=ap_result_str,
+            ap_dict=ap_dict,
+            eval_gt_annos=eval_gt_annos,
+            eval_det_annos=eval_det_annos,
+            class_names=class_names,
+            kitti_eval=kitti_eval,
+        )
         return ap_result_str, ap_dict
 
     def __len__(self):

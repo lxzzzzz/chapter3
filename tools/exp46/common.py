@@ -89,8 +89,20 @@ ROW_VARIANTS = {
     'D4': 'rule_route', 'D5': 'selective', 'D6': 'full',
     'E1': 'voxelnext', 'E2': 'pvga', 'E3': 'deform',
     'E4': 'rule_route', 'E5': 'selective', 'E6': 'full',
-    'F1': 'voxelnext', 'F2': 'direct', 'F3': 'deform', 'F4': 'selective', 'F5': 'full',
-    'G1': 'voxelnext', 'G2': 'pvga', 'G3': 'selective', 'G4': 'full',
+    'F1': 'full', 'F2': 'full', 'F3': 'full', 'F4': 'full', 'F5': 'full',
+    'G1': 'full', 'G2': 'full', 'G3': 'full', 'G4': 'full',
+}
+
+ROW_CFG_OVERRIDES = {
+    'F1': [('MODEL.ENABLE_AUX_LOSS', False), ('MODEL.AUX_LOSS_WEIGHT', 0.0)],
+    'F2': [('MODEL.ENABLE_AUX_LOSS', True), ('MODEL.AUX_LOSS_WEIGHT', 0.05)],
+    'F3': [('MODEL.ENABLE_AUX_LOSS', True), ('MODEL.AUX_LOSS_WEIGHT', 0.10)],
+    'F4': [('MODEL.ENABLE_AUX_LOSS', True), ('MODEL.AUX_LOSS_WEIGHT', 0.20)],
+    'F5': [('MODEL.ENABLE_AUX_LOSS', True), ('MODEL.AUX_LOSS_WEIGHT', 0.30)],
+    'G1': [('MODEL.BACKBONE_3D.DEFORMABLE_NUM_POINTS', 1)],
+    'G2': [('MODEL.BACKBONE_3D.DEFORMABLE_NUM_POINTS', 4)],
+    'G3': [('MODEL.BACKBONE_3D.DEFORMABLE_NUM_POINTS', 8)],
+    'G4': [('MODEL.BACKBONE_3D.DEFORMABLE_NUM_POINTS', 16)],
 }
 
 PROFILE_VARIANTS = {
@@ -103,7 +115,7 @@ PROFILE_VARIANTS = {
 
 COMPARE_METHODS = [
     'PointPillars', 'SECOND', 'CenterPoint', 'VoxelNeXt',
-    'TransFusion', 'BEVFusion', 'SparseFusion', 'DeepInteraction', 'Ours',
+    'TransFusion', 'BEVFusion', 'SparseFusion_DeepInteraction', 'Ours',
 ]
 
 METHOD_VARIANTS = {
@@ -113,9 +125,34 @@ METHOD_VARIANTS = {
     'VoxelNeXt': 'voxelnext',
     'TransFusion': 'transfusion',
     'BEVFusion': 'bevfusion',
-    'SparseFusion': 'direct',
-    'DeepInteraction': 'all_sample',
+    'SparseFusion_DeepInteraction': 'all_sample',
     'Ours': 'full',
+}
+
+METHOD_LABELS = {
+    'SparseFusion_DeepInteraction': 'SparseFusion/DeepInteraction',
+}
+
+METHOD_MODALITY = {
+    'PointPillars': 'LiDAR',
+    'SECOND': 'LiDAR',
+    'CenterPoint': 'LiDAR',
+    'VoxelNeXt': 'LiDAR',
+    'TransFusion': 'LiDAR+Camera',
+    'BEVFusion': 'LiDAR+Camera',
+    'SparseFusion_DeepInteraction': 'LiDAR+Camera',
+    'Ours': 'LiDAR+Camera+2D backend',
+}
+
+METHOD_FUSION_TYPE = {
+    'PointPillars': 'Pillar',
+    'SECOND': 'Voxel',
+    'CenterPoint': 'Voxel/BEV',
+    'VoxelNeXt': 'Sparse voxel',
+    'TransFusion': 'Query fusion',
+    'BEVFusion': 'BEV fusion',
+    'SparseFusion_DeepInteraction': 'Sparse interaction',
+    'Ours': 'VoxelNeXt',
 }
 
 
@@ -147,6 +184,20 @@ def set_nested(mapping, keys, value):
             cur[key] = {}
         cur = cur[key]
     cur[keys[-1]] = value
+
+
+def set_dotted(mapping, dotted_key, value):
+    set_nested(mapping, dotted_key.split('.'), value)
+
+
+def apply_row_overrides(cfg, row=None):
+    for dotted_key, value in ROW_CFG_OVERRIDES.get(row, []):
+        set_dotted(cfg, dotted_key, value)
+    if row in ROW_CFG_OVERRIDES:
+        cfg.setdefault('EXP46', {})['row_overrides'] = {
+            key: value for key, value in ROW_CFG_OVERRIDES[row]
+        }
+    return cfg
 
 
 def adapt_classes(cfg, classes):
@@ -246,7 +297,7 @@ def make_transfusion_cfg(spec):
     return cfg
 
 
-def make_cfg(variant, dataset, epochs):
+def make_cfg(variant, dataset, epochs, row=None):
     spec = dataset_specs()[dataset]
     if variant == 'pointpillar':
         cfg = load_yaml('tools/cfgs/kitti_models/pointpillar.yaml')
@@ -269,11 +320,12 @@ def make_cfg(variant, dataset, epochs):
     remove_gt_sampling(cfg)
     cfg.setdefault('OPTIMIZATION', {})['NUM_EPOCHS'] = int(epochs)
     cfg['OPTIMIZATION'].setdefault('BATCH_SIZE_PER_GPU', 4)
+    apply_row_overrides(cfg, row=row)
     return cfg
 
 
-def write_cfg(variant, dataset, epochs, name):
-    cfg = make_cfg(variant, dataset, epochs)
+def write_cfg(variant, dataset, epochs, name, row=None):
+    cfg = make_cfg(variant, dataset, epochs, row=row)
     cfg_path = CFG_DIR / f'{name}.yaml'
     dump_yaml(cfg, cfg_path)
     return cfg_path
@@ -307,29 +359,145 @@ def latest_eval_log():
     return logs[-1] if logs else None
 
 
-def parse_eval_log(log_path):
+PRIMARY_THRESHOLDS = {
+    'Car': '0.70,0.50,0.50',
+    'Pedestrian': '0.50,0.25,0.25',
+    'Cyclist': '0.50,0.25,0.25',
+}
+
+DISTANCE_KEYS = ['0-40', '40-80', '80-120']
+
+
+def _norm_threshold(text):
+    return ','.join(part.strip() for part in text.split(','))
+
+
+def _parse_ap_blocks(text):
+    blocks = {'overall': {}}
+    summary_lines = []
+    context = 'overall'
+    current = None
+    header_re = re.compile(r'^(Car|Pedestrian|Cyclist|Van|Truck)\s+(AP(?:_R40)?)@([0-9., ]+):')
+    metric_re = re.compile(r'^(bbox|bev|3d|aos)\s+AP:([0-9., -]+)')
+    range_re = re.compile(r'^--- Distance Range:\s*(\d+)m to (\d+)m ---')
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        range_match = range_re.match(line)
+        if range_match:
+            context = f'{range_match.group(1)}-{range_match.group(2)}'
+            blocks.setdefault(context, {})
+            summary_lines.append(line)
+            current = None
+            continue
+
+        header_match = header_re.match(line)
+        if header_match:
+            cls_name, family, threshold = header_match.groups()
+            threshold = _norm_threshold(threshold)
+            current = (context, cls_name, family, threshold)
+            blocks.setdefault(context, {}).setdefault(cls_name, {}).setdefault(family, {}).setdefault(threshold, {})
+            summary_lines.append(line)
+            continue
+
+        metric_match = metric_re.match(line)
+        if metric_match and current is not None:
+            metric_name, values = metric_match.groups()
+            nums = [float(item.strip()) for item in values.split(',') if item.strip()]
+            blocks[current[0]][current[1]][current[2]][current[3]][metric_name] = nums
+            summary_lines.append(line)
+            continue
+
+        if line.startswith('=') or 'Distance-based Evaluation' in line:
+            summary_lines.append(line)
+
+    return blocks, '\n'.join(summary_lines).strip() + '\n'
+
+
+def _select_class_value(blocks, context, cls_name):
+    cls_blocks = blocks.get(context, {}).get(cls_name, {})
+    r40_blocks = cls_blocks.get('AP_R40', {})
+    threshold = PRIMARY_THRESHOLDS.get(cls_name)
+    metric_block = r40_blocks.get(threshold, {}) if threshold else {}
+    if '3d' not in metric_block:
+        for candidate in r40_blocks.values():
+            if '3d' in candidate:
+                metric_block = candidate
+                break
+    values = metric_block.get('3d')
+    if not values or len(values) < 2:
+        return None
+    return float(values[1])
+
+
+def _mean_available(values):
+    valid = [value for value in values if value is not None]
+    if not valid:
+        return None
+    return float(sum(valid) / len(valid))
+
+
+def _build_table_values(blocks, class_names):
+    table_values = {
+        'metric_definition': '3D AP_R40 moderate; Car uses AP_R40@0.70,0.50,0.50, Pedestrian/Cyclist use AP_R40@0.50,0.25,0.25',
+        'per_class': {},
+    }
+
+    for cls_name in class_names:
+        cls_values = {'overall': _select_class_value(blocks, 'overall', cls_name)}
+        for dist_key in DISTANCE_KEYS:
+            cls_values[dist_key] = _select_class_value(blocks, dist_key, cls_name)
+        table_values['per_class'][cls_name] = cls_values
+
+    table_values['overall'] = _mean_available([
+        table_values['per_class'][cls_name]['overall'] for cls_name in class_names
+    ])
+    for dist_key in DISTANCE_KEYS:
+        table_values[dist_key] = _mean_available([
+            table_values['per_class'][cls_name][dist_key] for cls_name in class_names
+        ])
+    return table_values
+
+
+def parse_eval_log(log_path, dataset=None):
     metrics = {}
     if log_path is None or not log_path.exists():
         return metrics
     text = log_path.read_text(errors='ignore')
     for key, value in re.findall(r'(recall_(?:roi|rcnn)_[0-9.]+):\s+([0-9.]+)', text):
         metrics[key] = float(value)
-    for line in text.splitlines():
-        if '3d AP' in line.lower() or 'bev AP' in line.lower() or 'bbox AP' in line.lower():
-            nums = [float(x) for x in re.findall(r'(?<![A-Za-z])\d+\.\d+', line)]
-            if nums:
-                metrics.setdefault('ap_values', []).append(nums)
-    if metrics.get('ap_values'):
-        flat = [v for row in metrics['ap_values'] for v in row]
-        metrics['ap_mean'] = sum(flat) / len(flat)
+    blocks, summary_text = _parse_ap_blocks(text)
+    class_names = dataset_specs()[dataset].class_names if dataset else sorted(blocks.get('overall', {}).keys())
+    table_values = _build_table_values(blocks, class_names)
+    metrics['ap_blocks'] = blocks
+    metrics['eval_summary'] = summary_text
+    metrics['table_values'] = table_values
+    metrics['ap_3d'] = table_values.get('overall')
+    metrics['ap_0_40'] = table_values.get('0-40')
+    metrics['ap_40_80'] = table_values.get('40-80')
+    metrics['ap_80_120'] = table_values.get('80-120')
+    for cls_name, cls_values in table_values.get('per_class', {}).items():
+        prefix = cls_name.lower()
+        metrics[f'{prefix}_ap_3d'] = cls_values.get('overall')
+        metrics[f'{prefix}_ap_0_40'] = cls_values.get('0-40')
+        metrics[f'{prefix}_ap_40_80'] = cls_values.get('40-80')
+        metrics[f'{prefix}_ap_80_120'] = cls_values.get('80-120')
     return metrics
 
 
 def write_metrics(table, row, payload):
     path = metrics_path(table, row)
     path.parent.mkdir(parents=True, exist_ok=True)
+    summary_text = payload.pop('eval_summary', None)
+    table_values = payload.get('table_values')
     with open(path, 'w') as f:
         json.dump(payload, f, indent=2, sort_keys=True)
+    if summary_text is not None:
+        (path.parent / 'eval_summary.txt').write_text(summary_text)
+    if table_values is not None:
+        with open(path.parent / 'table_values.json', 'w') as f:
+            json.dump(table_values, f, indent=2, sort_keys=True)
+    write_table_markdown(table)
     return path
 
 
@@ -343,4 +511,66 @@ def read_metrics(table):
             item = json.load(f)
         item.setdefault('row', path.parent.name)
         rows.append(item)
+
+    if table in {'4-17', '4-18', '4-19', '4-20'}:
+        order = {name: idx for idx, name in enumerate(COMPARE_METHODS)}
+    elif table == '4-21':
+        order = {name: idx for idx, name in enumerate(PROFILE_VARIANTS.keys())}
+    else:
+        order = {name: idx for idx, name in enumerate(ROW_VARIANTS.keys())}
+    rows.sort(key=lambda item: (order.get(item.get('row'), 999), item.get('row', '')))
     return rows
+
+
+def format_table_value(value):
+    if isinstance(value, float):
+        return f'{value:.4f}'
+    if value is None:
+        return ''
+    return str(value)
+
+
+def table_columns(table, rows):
+    if table == '4-21':
+        return ['row', 'variant', 'dataset', 'params', 'trainable_params', 'elapsed_sec', 'profile_error']
+
+    columns = ['row']
+    if table in {'4-17', '4-18', '4-19', '4-20'}:
+        columns.extend(['method', 'modality', 'fusion_type'])
+    else:
+        columns.extend(['method', 'variant'])
+    columns.extend([
+        'dataset', 'epochs',
+        'ap_3d', 'ap_0_40', 'ap_40_80', 'ap_80_120',
+    ])
+    class_columns = [
+        'car_ap_3d', 'pedestrian_ap_3d', 'cyclist_ap_3d',
+        'car_ap_0_40', 'car_ap_40_80', 'car_ap_80_120',
+        'pedestrian_ap_0_40', 'pedestrian_ap_40_80', 'pedestrian_ap_80_120',
+        'cyclist_ap_0_40', 'cyclist_ap_40_80', 'cyclist_ap_80_120',
+    ]
+    for column in class_columns:
+        if any(row.get(column) is not None for row in rows):
+            columns.append(column)
+    columns.extend(['recall_rcnn_0.3', 'recall_rcnn_0.5', 'recall_rcnn_0.7'])
+    return columns
+
+
+def build_table_markdown(table, rows):
+    columns = table_columns(table, rows)
+    lines = [
+        '| ' + ' | '.join(columns) + ' |',
+        '| ' + ' | '.join(['---'] * len(columns)) + ' |',
+    ]
+    for row in rows:
+        lines.append('| ' + ' | '.join(format_table_value(row.get(col)) for col in columns) + ' |')
+    return '\n'.join(lines)
+
+
+def write_table_markdown(table):
+    rows = read_metrics(table)
+    if not rows:
+        return None
+    table_path = EXP_DIR / table / 'table.md'
+    table_path.write_text(build_table_markdown(table, rows) + '\n')
+    return table_path

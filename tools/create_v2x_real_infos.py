@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from PIL import Image
 
 
 CAMERA_IDS = ('02', '03', '04', '05')
@@ -89,6 +90,29 @@ def infer_image_shape_from_projection(calib_dict):
     width = max(int(round(cx * 2.0)), 1)
     height = max(int(round(cy * 2.0)), 1)
     return np.asarray([height, width], dtype=np.int32)
+
+
+def find_reference_image(root_path, sequence_id, frame_id, format_cfg, reference_camera):
+    image_dirname = format_cfg['PATHS'].get('IMAGE_DIRNAME', f'training/image_{reference_camera}')
+    image_root = root_path / image_dirname
+    if image_root.name != f'image_{reference_camera}':
+        image_root = image_root.parent / f'image_{reference_camera}'
+
+    suffix = format_cfg.get('IMAGE_SUFFIX', '.png')
+    candidates = [
+        image_root / sequence_id / f'{frame_id}{suffix}',
+        image_root / sequence_id / f'{frame_id}.jpg',
+        image_root / sequence_id / f'{frame_id}.jpeg',
+        image_root / f'{sequence_id}_{frame_id}{suffix}',
+        image_root / f'{frame_id}{suffix}',
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f'Missing reference camera image for camera={reference_camera}, '
+        f'sequence={sequence_id}, frame={frame_id}; searched under {image_root}'
+    )
 
 
 def parse_sequence_camera_labels(label_file):
@@ -235,7 +259,9 @@ def build_frame_info(root_path, sequence_id, frame_id, frame_idx, format_cfg, re
         raise FileNotFoundError(f'Missing calib file: {calib_file}')
 
     calib_dict = load_multicam_calib(calib_file, reference_camera=reference_camera)
-    image_shape = infer_image_shape_from_projection(calib_dict)
+    image_file = find_reference_image(root_path, sequence_id, frame_id, format_cfg, reference_camera)
+    with Image.open(image_file) as image:
+        image_shape = np.asarray([image.height, image.width], dtype=np.int32)
     merged_annos = merge_frame_annos(labels_by_camera, frame_idx=frame_idx, tolerance=tolerance)
     annos = build_annos(merged_annos, calib_dict)
 
@@ -250,8 +276,9 @@ def build_frame_info(root_path, sequence_id, frame_id, frame_idx, format_cfg, re
         },
         'image': {
             'image_idx': str(frame_id),
-            'image_path': '',
+            'image_path': str(image_file.relative_to(root_path)),
             'image_shape': image_shape,
+            'reference_camera': str(reference_camera),
         },
         'calib': calib_dict,
         'annos': annos,

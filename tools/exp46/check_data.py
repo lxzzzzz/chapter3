@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 from pathlib import Path
 
 from common import ROOT_DIR, dataset_specs
@@ -87,19 +88,40 @@ def main():
             suffix = 'BROKEN_SYMLINK' if broken else ('OK' if exists else 'MISSING')
             print(f'  data: {path} {suffix}')
             ok = ok and exists
+        if spec.key == 'v2x_real':
+            image_dirs = [
+                local / 'training' / name
+                for name in ('image_02', 'image_03', 'image_04', 'image_05')
+            ]
+            available = [path.name for path in image_dirs if path.exists()]
+            if available:
+                print(f'  optional images: {", ".join(available)} OK')
+            else:
+                print('  optional images: none found; V2X-Real will use LiDAR-only configs')
         for split, names in spec.info_path.items():
             for name in names:
                 path = local / name
                 exists = path.exists()
                 print(f'  {split}: {path} {"OK" if exists else "MISSING"}')
                 ok = ok and exists
+                if exists and spec.key == 'v2x_real':
+                    try:
+                        with open(path, 'rb') as f:
+                            infos = pickle.load(f)
+                        image_path = infos[0].get('image', {}).get('image_path', '') if infos else ''
+                        image_ok = bool(image_path)
+                        print(f'  {split} image_path in info: {image_path if image_ok else "MISSING"}')
+                        ok = ok and image_ok
+                    except Exception as exc:
+                        print(f'  {split} image_path check failed: {exc!r}')
+                        ok = False
         if external is not None and not external_exists:
             print(f'  optional external fix: export ROAD_ROOT=/path/to/Roadside')
         print(f'  local dataset root: {local}')
         if spec.key == 'mths':
             print('  build if missing: python tools/create_v2x_xian_infos.py --data_path data/v2x_xian --save_path data/v2x_xian --splits train val')
         elif spec.key == 'v2x_real':
-            print('  build if missing: python tools/create_v2x_real_infos.py --data_path data/v2x_real --save_path data/v2x_real --splits train val')
+            print('  rebuild for multimodal: python tools/create_v2x_real_infos.py --data_path data/v2x_real --save_path data/v2x_real --splits train val --reference_camera 02')
     raise SystemExit(0 if ok else 1)
 
 

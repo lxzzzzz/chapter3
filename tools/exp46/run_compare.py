@@ -1,7 +1,27 @@
 import argparse
 import time
 
-from common import COMPARE_METHODS, METHOD_VARIANTS, latest_eval_log, parse_eval_log, run_train, write_cfg, write_metrics
+from common import (
+    COMPARE_METHODS,
+    METHOD_FUSION_TYPE,
+    METHOD_LABELS,
+    METHOD_MODALITY,
+    METHOD_VARIANTS,
+    latest_eval_log,
+    parse_eval_log,
+    run_train,
+    write_cfg,
+    write_metrics,
+)
+
+
+def resolve_method(name):
+    if name in METHOD_VARIANTS:
+        return name
+    for row, label in METHOD_LABELS.items():
+        if name == label:
+            return row
+    raise KeyError(f'Unknown compare method: {name}')
 
 
 def main():
@@ -14,18 +34,21 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
 
-    methods = args.only if args.only else COMPARE_METHODS
-    for method in methods:
-        variant = METHOD_VARIANTS[method]
-        row = method
-        cfg_path = write_cfg(variant, args.dataset, args.epochs, f'{args.table}_{method}_{args.dataset}')
+    methods = [resolve_method(name) for name in args.only] if args.only else COMPARE_METHODS
+    for method_key in methods:
+        variant = METHOD_VARIANTS[method_key]
+        row = method_key
+        method_label = METHOD_LABELS.get(method_key, method_key)
+        cfg_path = write_cfg(variant, args.dataset, args.epochs, f'{args.table}_{method_key}_{args.dataset}')
         start = time.time()
         cmd = run_train(cfg_path, args.table, row, args.epochs, workers=args.workers)
-        metrics = parse_eval_log(latest_eval_log())
+        metrics = parse_eval_log(latest_eval_log(), dataset=args.dataset)
         metrics.update({
             'table': args.table,
             'row': row,
-            'method': method,
+            'method': method_label,
+            'modality': METHOD_MODALITY.get(method_key),
+            'fusion_type': METHOD_FUSION_TYPE.get(method_key),
             'dataset': args.dataset,
             'variant': variant,
             'metric_set': args.metric_set,
