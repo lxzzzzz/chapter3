@@ -29,7 +29,14 @@ class DatasetSpec:
 
 
 def road_root():
-    return Path(os.environ.get('ROAD_ROOT', '/media/lx/LY/Roadside'))
+    value = os.environ.get('ROAD_ROOT', '').strip()
+    return Path(value) if value else None
+
+
+def external_dataset_path(roadside_root, *parts):
+    if roadside_root is None:
+        return ''
+    return str(roadside_root.joinpath(*parts))
 
 
 def dataset_specs():
@@ -39,7 +46,7 @@ def dataset_specs():
             key='mths',
             class_names=['Car'],
             data_path='data/v2x_xian',
-            external_path=str(rr / 'V2X-xian-trainval-kitti'),
+            external_path=external_dataset_path(rr, 'V2X-xian-trainval-kitti'),
             lidar_base='tools/cfgs/dataset_configs/v2x_xian_lidar_det_dataset.yaml',
             fusion_base='tools/cfgs/dataset_configs/v2x_xian_fusion_det_dataset.yaml',
             point_cloud_range=[0, -20, -4.5, 120, 30, 10.5],
@@ -50,7 +57,7 @@ def dataset_specs():
             key='dair',
             class_names=['Car', 'Pedestrian', 'Cyclist'],
             data_path='data/dair_v2x',
-            external_path=str(rr / 'DAIR-V2X-I' / 'DAIR-V2X-I-kitti'),
+            external_path=external_dataset_path(rr, 'DAIR-V2X-I', 'DAIR-V2X-I-kitti'),
             lidar_base='tools/cfgs/dataset_configs/dair_v2x_lidar_dataset_100m.yaml',
             fusion_base='tools/cfgs/dataset_configs/dair_v2x_dataset_100m.yaml',
             point_cloud_range=[0, -51.2, -5, 102.4, 51.2, 3],
@@ -61,7 +68,7 @@ def dataset_specs():
             key='v2x_real',
             class_names=['Car'],
             data_path='data/v2x_real',
-            external_path=str(rr / 'V2X-Real-trainval'),
+            external_path=external_dataset_path(rr, 'V2X-Real-trainval'),
             lidar_base='tools/cfgs/dataset_configs/v2x_real_lidar_det_dataset.yaml',
             fusion_base='tools/cfgs/dataset_configs/v2x_real_lidar_det_dataset.yaml',
             point_cloud_range=[-102.4, -40, -15, 102.4, 40, 15],
