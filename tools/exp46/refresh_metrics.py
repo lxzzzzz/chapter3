@@ -28,7 +28,7 @@ def main():
     dataset = infer_dataset(args.table, args.dataset)
     log_path = latest_eval_log(args.table, args.row)
     if log_path is None:
-        raise FileNotFoundError(f'No log_eval_*.txt found for {args.table}/{args.row}')
+        raise FileNotFoundError(f'No log_eval_*.txt or train_*.log found for {args.table}/{args.row}')
 
     path = metrics_path(args.table, args.row)
     if path.exists():

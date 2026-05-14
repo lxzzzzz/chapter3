@@ -378,14 +378,18 @@ def metrics_path(table, row):
 
 
 def latest_eval_log(table=None, row=None):
+    patterns = ['log_eval_*.txt', 'train_*.log']
     if table is not None and row is not None:
-        logs = sorted(
-            (ROOT_DIR / 'output').glob(f'**/exp46/{table}/{row}/**/log_eval_*.txt'),
-            key=lambda p: p.stat().st_mtime,
-        )
+        logs = []
+        for pattern in patterns:
+            logs.extend((ROOT_DIR / 'output').glob(f'**/exp46/{table}/{row}/**/{pattern}'))
+        logs = sorted(logs, key=lambda p: p.stat().st_mtime)
         if logs:
             return logs[-1]
-    logs = sorted((ROOT_DIR / 'output').glob('**/log_eval_*.txt'), key=lambda p: p.stat().st_mtime)
+    logs = []
+    for pattern in patterns:
+        logs.extend((ROOT_DIR / 'output').glob(f'**/{pattern}'))
+    logs = sorted(logs, key=lambda p: p.stat().st_mtime)
     return logs[-1] if logs else None
 
 
