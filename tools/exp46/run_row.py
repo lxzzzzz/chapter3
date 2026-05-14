@@ -26,7 +26,7 @@ def main():
         workers=args.workers,
         batch_size=args.batch_size,
     )
-    metrics = parse_eval_log(latest_eval_log(), dataset=args.dataset)
+    metrics = parse_eval_log(latest_eval_log(args.table, args.row), dataset=args.dataset)
     metrics.update({
         'table': args.table,
         'row': args.row,

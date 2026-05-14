@@ -356,7 +356,14 @@ def metrics_path(table, row):
     return EXP_DIR / table / row / 'metrics.json'
 
 
-def latest_eval_log():
+def latest_eval_log(table=None, row=None):
+    if table is not None and row is not None:
+        logs = sorted(
+            (ROOT_DIR / 'output').glob(f'**/exp46/{table}/{row}/**/log_eval_*.txt'),
+            key=lambda p: p.stat().st_mtime,
+        )
+        if logs:
+            return logs[-1]
     logs = sorted((ROOT_DIR / 'output').glob('**/log_eval_*.txt'), key=lambda p: p.stat().st_mtime)
     return logs[-1] if logs else None
 

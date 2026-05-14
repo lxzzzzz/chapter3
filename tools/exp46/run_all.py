@@ -39,17 +39,20 @@ def append_jsonl(path, payload):
         f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + '\n')
 
 
-def metrics_exists(table, row):
-    return (EXP_DIR / table / row / 'metrics.json').exists()
+def result_complete(table, row):
+    row_dir = EXP_DIR / table / row
+    if table == '4-21':
+        return (row_dir / 'metrics.json').exists()
+    return all((row_dir / name).exists() for name in ('metrics.json', 'eval_summary.txt', 'table_values.json'))
 
 
 def skip_command(name, status_path):
-    print(f'\n[{now()}] SKIP {name} metrics.json exists', flush=True)
+    print(f'\n[{now()}] SKIP {name} result files exist', flush=True)
     append_jsonl(status_path, {
         'name': name,
         'returncode': 0,
         'skipped': True,
-        'reason': 'metrics.json exists',
+        'reason': 'result files exist',
         'ended_at': time.time(),
     })
 
@@ -123,7 +126,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to every training job')
     parser.add_argument('--continue-on-error', action='store_true')
     parser.add_argument('--skip-check-data', action='store_true')
-    parser.add_argument('--skip-existing', action='store_true', help='skip rows that already have output/exp46/<table>/<row>/metrics.json')
+    parser.add_argument('--skip-existing', action='store_true', help='skip rows that already have complete result files')
     args = parser.parse_args()
 
     run_id = dt.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -147,7 +150,7 @@ def main():
 
     for table, rows in ABLATION_TABLES:
         for row in rows:
-            if args.skip_existing and metrics_exists(table, row):
+            if args.skip_existing and result_complete(table, row):
                 skip_command(f'{table} {row}', status_path)
                 continue
             stream_command(
@@ -167,7 +170,7 @@ def main():
         collect_table(table, log_path, status_path, args.continue_on_error)
 
     for table, dataset, metric_set in COMPARE_TABLES:
-        methods = [row for row in COMPARE_METHODS if not (args.skip_existing and metrics_exists(table, row))]
+        methods = [row for row in COMPARE_METHODS if not (args.skip_existing and result_complete(table, row))]
         if not methods:
             print(f'\n[{now()}] SKIP {table} compare {dataset} all metrics.json files exist', flush=True)
             collect_table(table, log_path, status_path, args.continue_on_error)
@@ -188,7 +191,7 @@ def main():
         collect_table(table, log_path, status_path, args.continue_on_error)
 
     for row in PROFILE_ROWS:
-        if args.skip_existing and metrics_exists('4-21', row):
+        if args.skip_existing and result_complete('4-21', row):
             skip_command(f'4-21 {row}', status_path)
             continue
         stream_command(
