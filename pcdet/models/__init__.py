@@ -8,9 +8,20 @@ from .detectors import build_detector
 try:
     import kornia
 except:
-    pass 
+    kornia = None
     # print('Warning: kornia is not installed. This package is only required by CaDDN')
 
+
+def image_to_tensor(images):
+    if kornia is not None:
+        return kornia.image_to_tensor(images)
+
+    tensor = torch.from_numpy(images)
+    if tensor.ndim == 3:
+        return tensor.permute(2, 0, 1)
+    if tensor.ndim == 4:
+        return tensor.permute(0, 3, 1, 2)
+    raise ValueError(f'Unsupported image tensor shape: {tuple(tensor.shape)}')
 
 
 def build_network(model_cfg, num_class, dataset):
@@ -31,7 +42,7 @@ def load_data_to_gpu(batch_dict):
         elif key in ['frame_id', 'metadata', 'calib', 'image_paths','ori_shape','img_process_infos']:
             continue
         elif key in ['images']:
-            batch_dict[key] = kornia.image_to_tensor(val).float().cuda().contiguous()
+            batch_dict[key] = image_to_tensor(val).float().cuda().contiguous()
         elif key in ['image_shape']:
             batch_dict[key] = torch.from_numpy(val).int().cuda()
         else:
