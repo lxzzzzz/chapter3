@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import EXP_DIR, ROOT_DIR
+from common import COMPARE_METHODS, EXP_DIR, ROOT_DIR
 
 
 ABLATION_TABLES = [
@@ -37,6 +37,21 @@ def append_jsonl(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'a') as f:
         f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + '\n')
+
+
+def metrics_exists(table, row):
+    return (EXP_DIR / table / row / 'metrics.json').exists()
+
+
+def skip_command(name, status_path):
+    print(f'\n[{now()}] SKIP {name} metrics.json exists', flush=True)
+    append_jsonl(status_path, {
+        'name': name,
+        'returncode': 0,
+        'skipped': True,
+        'reason': 'metrics.json exists',
+        'ended_at': time.time(),
+    })
 
 
 def stream_command(name, cmd, log_path, status_path, continue_on_error):
@@ -108,6 +123,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to every training job')
     parser.add_argument('--continue-on-error', action='store_true')
     parser.add_argument('--skip-check-data', action='store_true')
+    parser.add_argument('--skip-existing', action='store_true', help='skip rows that already have output/exp46/<table>/<row>/metrics.json')
     args = parser.parse_args()
 
     run_id = dt.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -131,6 +147,9 @@ def main():
 
     for table, rows in ABLATION_TABLES:
         for row in rows:
+            if args.skip_existing and metrics_exists(table, row):
+                skip_command(f'{table} {row}', status_path)
+                continue
             stream_command(
                 f'{table} {row}',
                 [
@@ -148,6 +167,11 @@ def main():
         collect_table(table, log_path, status_path, args.continue_on_error)
 
     for table, dataset, metric_set in COMPARE_TABLES:
+        methods = [row for row in COMPARE_METHODS if not (args.skip_existing and metrics_exists(table, row))]
+        if not methods:
+            print(f'\n[{now()}] SKIP {table} compare {dataset} all metrics.json files exist', flush=True)
+            collect_table(table, log_path, status_path, args.continue_on_error)
+            continue
         cmd = [
             sys.executable, 'tools/exp46/run_compare.py',
             '--table', table,
@@ -158,10 +182,15 @@ def main():
         ]
         if args.batch_size is not None:
             cmd.extend(['--batch-size', str(args.batch_size)])
+        if args.skip_existing:
+            cmd.extend(['--only'] + methods)
         stream_command(f'{table} compare {dataset}', cmd, log_path, status_path, args.continue_on_error)
         collect_table(table, log_path, status_path, args.continue_on_error)
 
     for row in PROFILE_ROWS:
+        if args.skip_existing and metrics_exists('4-21', row):
+            skip_command(f'4-21 {row}', status_path)
+            continue
         stream_command(
             f'4-21 {row}',
             [sys.executable, 'tools/exp46/profile_row.py', '--row', row, '--dataset', 'mths'],

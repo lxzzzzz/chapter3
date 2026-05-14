@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import spconv.pytorch as spconv
 from pcdet.models.backbones_3d.spconv_backbone import replace_feature
+from pcdet.models.model_utils.affine_utils import invert_affine_4x4
 import torchvision.models as models
 from functools import partial
 
@@ -176,7 +177,7 @@ class DeformableRectifier(nn.Module):
         batch_ids = indices[:, 0].long()
         if 'lidar_aug_matrix' in batch_dict:
             aug_mats = batch_dict['lidar_aug_matrix'].float()
-            point_aug_inv = torch.inverse(aug_mats[batch_ids])
+            point_aug_inv = invert_affine_4x4(aug_mats[batch_ids])
             xyz_hom = torch.matmul(point_aug_inv, xyz_hom.unsqueeze(-1)).squeeze(-1)
         point_trans_mats = trans_mats[batch_ids].float()
 
