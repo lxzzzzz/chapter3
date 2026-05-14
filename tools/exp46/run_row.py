@@ -11,6 +11,7 @@ def main():
     parser.add_argument('--dataset', default='mths', choices=['mths', 'dair', 'v2x_real'])
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to tools/train.py')
     args = parser.parse_args()
 
     variant = ROW_VARIANTS[args.row]
@@ -20,7 +21,11 @@ def main():
         row=args.row,
     )
     start = time.time()
-    cmd = run_train(cfg_path, args.table, args.row, args.epochs, workers=args.workers)
+    cmd = run_train(
+        cfg_path, args.table, args.row, args.epochs,
+        workers=args.workers,
+        batch_size=args.batch_size,
+    )
     metrics = parse_eval_log(latest_eval_log(), dataset=args.dataset)
     metrics.update({
         'table': args.table,

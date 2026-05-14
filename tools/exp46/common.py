@@ -331,7 +331,7 @@ def write_cfg(variant, dataset, epochs, name, row=None):
     return cfg_path
 
 
-def run_train(cfg_path, table, row, epochs, workers=4, extra_args=None):
+def run_train(cfg_path, table, row, epochs, workers=4, batch_size=None, extra_args=None):
     cmd = [
         sys.executable, 'tools/train.py',
         '--cfg_file', str(cfg_path.relative_to(ROOT_DIR)),
@@ -342,6 +342,8 @@ def run_train(cfg_path, table, row, epochs, workers=4, extra_args=None):
         '--ckpt_save_interval', str(max(1, int(epochs))),
         '--workers', str(workers),
     ]
+    if batch_size is not None:
+        cmd.extend(['--batch_size', str(batch_size)])
     if extra_args:
         cmd.extend(extra_args)
     proc = subprocess.run(cmd, cwd=ROOT_DIR)

@@ -105,6 +105,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run all Chapter 4.6 experiments in sequence.')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to every training job')
     parser.add_argument('--continue-on-error', action='store_true')
     parser.add_argument('--skip-check-data', action='store_true')
     args = parser.parse_args()
@@ -139,7 +140,7 @@ def main():
                     '--dataset', 'mths',
                     '--epochs', str(args.epochs),
                     '--workers', str(args.workers),
-                ],
+                ] + ([] if args.batch_size is None else ['--batch-size', str(args.batch_size)]),
                 log_path,
                 status_path,
                 args.continue_on_error,
@@ -155,6 +156,8 @@ def main():
             '--metric-set', metric_set,
             '--workers', str(args.workers),
         ]
+        if args.batch_size is not None:
+            cmd.extend(['--batch-size', str(args.batch_size)])
         stream_command(f'{table} compare {dataset}', cmd, log_path, status_path, args.continue_on_error)
         collect_table(table, log_path, status_path, args.continue_on_error)
 
