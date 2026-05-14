@@ -12,6 +12,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to tools/train.py')
+    parser.add_argument('--max-voxels', type=int, default=None, help='cap train/test MAX_NUMBER_OF_VOXELS in generated config')
+    parser.add_argument('--amp', action='store_true', help='enable mixed precision training')
     args = parser.parse_args()
 
     variant = ROW_VARIANTS[args.row]
@@ -19,12 +21,14 @@ def main():
         variant, args.dataset, args.epochs,
         f'{args.table}_{args.row}_{args.dataset}',
         row=args.row,
+        max_voxels=args.max_voxels,
     )
     start = time.time()
     cmd = run_train(
         cfg_path, args.table, args.row, args.epochs,
         workers=args.workers,
         batch_size=args.batch_size,
+        use_amp=args.amp,
     )
     metrics = parse_eval_log(latest_eval_log(args.table, args.row), dataset=args.dataset)
     metrics.update({

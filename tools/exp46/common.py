@@ -177,6 +177,24 @@ def remove_gt_sampling(cfg):
     ]
 
 
+def limit_max_voxels(cfg, max_voxels=None):
+    if max_voxels is None:
+        return
+    max_voxels = int(max_voxels)
+    data_cfg = cfg.get('DATA_CONFIG', {})
+    processors = data_cfg.get('DATA_PROCESSOR')
+    if not processors and data_cfg.get('_BASE_CONFIG_'):
+        base_cfg = load_yaml(data_cfg['_BASE_CONFIG_'])
+        processors = deepcopy(base_cfg.get('DATA_PROCESSOR', []))
+        data_cfg['DATA_PROCESSOR'] = processors
+    for processor in processors or []:
+        if processor.get('NAME') == 'transform_points_to_voxels':
+            processor['MAX_NUMBER_OF_VOXELS'] = {
+                'train': max_voxels,
+                'test': max_voxels,
+            }
+
+
 def set_nested(mapping, keys, value):
     cur = mapping
     for key in keys[:-1]:
@@ -297,7 +315,7 @@ def make_transfusion_cfg(spec):
     return cfg
 
 
-def make_cfg(variant, dataset, epochs, row=None):
+def make_cfg(variant, dataset, epochs, row=None, max_voxels=None):
     spec = dataset_specs()[dataset]
     if variant == 'pointpillar':
         cfg = load_yaml('tools/cfgs/kitti_models/pointpillar.yaml')
@@ -318,20 +336,21 @@ def make_cfg(variant, dataset, epochs, row=None):
 
     adapt_classes(cfg, spec.class_names)
     remove_gt_sampling(cfg)
+    limit_max_voxels(cfg, max_voxels=max_voxels)
     cfg.setdefault('OPTIMIZATION', {})['NUM_EPOCHS'] = int(epochs)
     cfg['OPTIMIZATION'].setdefault('BATCH_SIZE_PER_GPU', 4)
     apply_row_overrides(cfg, row=row)
     return cfg
 
 
-def write_cfg(variant, dataset, epochs, name, row=None):
-    cfg = make_cfg(variant, dataset, epochs, row=row)
+def write_cfg(variant, dataset, epochs, name, row=None, max_voxels=None):
+    cfg = make_cfg(variant, dataset, epochs, row=row, max_voxels=max_voxels)
     cfg_path = CFG_DIR / f'{name}.yaml'
     dump_yaml(cfg, cfg_path)
     return cfg_path
 
 
-def run_train(cfg_path, table, row, epochs, workers=4, batch_size=None, extra_args=None):
+def run_train(cfg_path, table, row, epochs, workers=4, batch_size=None, use_amp=False, extra_args=None):
     cmd = [
         sys.executable, 'tools/train.py',
         '--cfg_file', str(cfg_path.relative_to(ROOT_DIR)),
@@ -344,6 +363,8 @@ def run_train(cfg_path, table, row, epochs, workers=4, batch_size=None, extra_ar
     ]
     if batch_size is not None:
         cmd.extend(['--batch_size', str(batch_size)])
+    if use_amp:
+        cmd.append('--use_amp')
     if extra_args:
         cmd.extend(extra_args)
     proc = subprocess.run(cmd, cwd=ROOT_DIR)

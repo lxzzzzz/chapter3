@@ -33,6 +33,8 @@ def main():
     parser.add_argument('--only', nargs='*', default=None)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to tools/train.py')
+    parser.add_argument('--max-voxels', type=int, default=None, help='cap train/test MAX_NUMBER_OF_VOXELS in generated config')
+    parser.add_argument('--amp', action='store_true', help='enable mixed precision training')
     args = parser.parse_args()
 
     methods = [resolve_method(name) for name in args.only] if args.only else COMPARE_METHODS
@@ -40,12 +42,17 @@ def main():
         variant = METHOD_VARIANTS[method_key]
         row = method_key
         method_label = METHOD_LABELS.get(method_key, method_key)
-        cfg_path = write_cfg(variant, args.dataset, args.epochs, f'{args.table}_{method_key}_{args.dataset}')
+        cfg_path = write_cfg(
+            variant, args.dataset, args.epochs,
+            f'{args.table}_{method_key}_{args.dataset}',
+            max_voxels=args.max_voxels,
+        )
         start = time.time()
         cmd = run_train(
             cfg_path, args.table, row, args.epochs,
             workers=args.workers,
             batch_size=args.batch_size,
+            use_amp=args.amp,
         )
         metrics = parse_eval_log(latest_eval_log(args.table, row), dataset=args.dataset)
         metrics.update({

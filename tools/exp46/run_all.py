@@ -124,6 +124,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to every training job')
+    parser.add_argument('--max-voxels', type=int, default=None, help='cap train/test MAX_NUMBER_OF_VOXELS in generated configs')
+    parser.add_argument('--amp', action='store_true', help='enable mixed precision training')
     parser.add_argument('--continue-on-error', action='store_true')
     parser.add_argument('--skip-check-data', action='store_true')
     parser.add_argument('--skip-existing', action='store_true', help='skip rows that already have complete result files')
@@ -162,7 +164,10 @@ def main():
                     '--dataset', 'mths',
                     '--epochs', str(args.epochs),
                     '--workers', str(args.workers),
-                ] + ([] if args.batch_size is None else ['--batch-size', str(args.batch_size)]),
+                ]
+                + ([] if args.batch_size is None else ['--batch-size', str(args.batch_size)])
+                + ([] if args.max_voxels is None else ['--max-voxels', str(args.max_voxels)])
+                + ([] if not args.amp else ['--amp']),
                 log_path,
                 status_path,
                 args.continue_on_error,
@@ -185,6 +190,10 @@ def main():
         ]
         if args.batch_size is not None:
             cmd.extend(['--batch-size', str(args.batch_size)])
+        if args.max_voxels is not None:
+            cmd.extend(['--max-voxels', str(args.max_voxels)])
+        if args.amp:
+            cmd.append('--amp')
         if args.skip_existing:
             cmd.extend(['--only'] + methods)
         stream_command(f'{table} compare {dataset}', cmd, log_path, status_path, args.continue_on_error)
