@@ -221,6 +221,8 @@ def main():
             cmd.extend(['--max-voxels', str(args.max_voxels)])
         if args.amp:
             cmd.append('--amp')
+        if args.continue_on_error:
+            cmd.append('--continue-on-error')
         if args.skip_existing:
             cmd.extend(['--only'] + methods)
         stream_command(f'{table} compare {dataset}', cmd, log_path, status_path, args.continue_on_error)

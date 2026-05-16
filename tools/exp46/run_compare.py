@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 import time
 
 from common import (
@@ -35,6 +36,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=None, help='global batch size passed to tools/train.py')
     parser.add_argument('--max-voxels', type=int, default=None, help='cap train/test MAX_NUMBER_OF_VOXELS in generated config')
     parser.add_argument('--amp', action='store_true', help='enable mixed precision training')
+    parser.add_argument('--continue-on-error', action='store_true')
     args = parser.parse_args()
 
     methods = [resolve_method(name) for name in args.only] if args.only else COMPARE_METHODS
@@ -48,12 +50,34 @@ def main():
             max_voxels=args.max_voxels,
         )
         start = time.time()
-        cmd = run_train(
-            cfg_path, args.table, row, args.epochs,
-            workers=args.workers,
-            batch_size=args.batch_size,
-            use_amp=args.amp,
-        )
+        try:
+            cmd = run_train(
+                cfg_path, args.table, row, args.epochs,
+                workers=args.workers,
+                batch_size=args.batch_size,
+                use_amp=args.amp,
+            )
+        except subprocess.CalledProcessError as exc:
+            if not args.continue_on_error:
+                raise
+            metrics = {
+                'table': args.table,
+                'row': row,
+                'method': method_label,
+                'modality': METHOD_MODALITY.get(method_key),
+                'fusion_type': METHOD_FUSION_TYPE.get(method_key),
+                'dataset': args.dataset,
+                'variant': variant,
+                'metric_set': args.metric_set,
+                'epochs': args.epochs,
+                'config': str(cfg_path),
+                'train_cmd': exc.cmd,
+                'elapsed_sec': time.time() - start,
+                'error': f'CalledProcessError returncode={exc.returncode}',
+            }
+            path = write_metrics(args.table, row, metrics)
+            print(f'wrote failed metrics {path}')
+            continue
         metrics = parse_eval_log(latest_eval_log(args.table, row), dataset=args.dataset)
         metrics.update({
             'table': args.table,

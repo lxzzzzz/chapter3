@@ -215,16 +215,52 @@ def set_point_cloud_range(cfg, point_cloud_range):
         dense['POST_PROCESSING']['POST_CENTER_RANGE'] = point_cloud_range
 
 
-def limit_max_voxels(cfg, max_voxels=None):
-    if max_voxels is None:
-        return
-    max_voxels = int(max_voxels)
-    data_cfg = cfg.get('DATA_CONFIG', {})
+def ensure_data_processors(cfg):
+    data_cfg = cfg.setdefault('DATA_CONFIG', {})
     processors = data_cfg.get('DATA_PROCESSOR')
     if not processors and data_cfg.get('_BASE_CONFIG_'):
         base_cfg = load_yaml(data_cfg['_BASE_CONFIG_'])
         processors = deepcopy(base_cfg.get('DATA_PROCESSOR', []))
         data_cfg['DATA_PROCESSOR'] = processors
+    return processors or []
+
+
+def set_voxel_size(cfg, voxel_size):
+    data_cfg = cfg.setdefault('DATA_CONFIG', {})
+    for processor in ensure_data_processors(cfg):
+        if processor.get('NAME') == 'transform_points_to_voxels':
+            processor['VOXEL_SIZE'] = [float(x) for x in voxel_size]
+
+    model_cfg = cfg.setdefault('MODEL', {})
+    model_cfg['VOXEL_SIZE'] = [float(x) for x in voxel_size]
+    if model_cfg.get('BACKBONE_3D'):
+        model_cfg['BACKBONE_3D']['VOXEL_SIZE'] = [float(x) for x in voxel_size]
+
+
+def make_compressed_3d_voxel_size(spec, target_z_cells=40):
+    z_extent = float(spec.point_cloud_range[5] - spec.point_cloud_range[2])
+    return [float(spec.voxel_size[0]), float(spec.voxel_size[1]), z_extent / float(target_z_cells)]
+
+
+def adapt_compressed_3d_grid(cfg, spec, feature_map_stride=8):
+    voxel_size = make_compressed_3d_voxel_size(spec)
+    point_cloud_range = align_range_to_grid_multiple(
+        spec.point_cloud_range,
+        voxel_size,
+        grid_multiple=feature_map_stride,
+    )
+    set_voxel_size(cfg, voxel_size)
+    set_point_cloud_range(cfg, point_cloud_range)
+    if cfg.get('MODEL', {}).get('MAP_TO_BEV'):
+        cfg['MODEL']['MAP_TO_BEV']['NUM_BEV_FEATURES'] = 256
+
+
+def limit_max_voxels(cfg, max_voxels=None):
+    if max_voxels is None:
+        return
+    max_voxels = int(max_voxels)
+    data_cfg = cfg.get('DATA_CONFIG', {})
+    processors = ensure_data_processors(cfg)
     for processor in processors or []:
         if processor.get('NAME') == 'transform_points_to_voxels':
             processor['MAX_NUMBER_OF_VOXELS'] = {
@@ -365,11 +401,14 @@ def make_cfg(variant, dataset, epochs, row=None, max_voxels=None):
     elif variant == 'second':
         cfg = load_yaml('tools/cfgs/kitti_models/second.yaml')
         adapt_dataset(cfg, spec, use_images=False)
+        adapt_compressed_3d_grid(cfg, spec, feature_map_stride=8)
     elif variant == 'centerpoint':
         cfg = load_yaml('tools/cfgs/once_models/centerpoint.yaml')
         adapt_dataset(cfg, spec, use_images=False)
+        adapt_compressed_3d_grid(cfg, spec, feature_map_stride=8)
     elif variant == 'transfusion':
         cfg = make_transfusion_cfg(spec)
+        adapt_compressed_3d_grid(cfg, spec, feature_map_stride=8)
     else:
         cfg = make_voxelnext_cfg(spec, variant)
 
