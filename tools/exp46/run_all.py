@@ -27,6 +27,8 @@ COMPARE_TABLES = [
 
 PROFILE_ROWS = ['voxelnext', 'v43', 'v43_v45', 'det2d', 'full']
 
+TABLE_ORDER = [table for table, _ in ABLATION_TABLES] + [table for table, _, _ in COMPARE_TABLES] + ['4-21']
+
 
 def now():
     return dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -126,6 +128,14 @@ def collect_table(table, log_path, status_path, continue_on_error):
         raise SystemExit(proc.returncode)
 
 
+def should_run_table(table, start_table):
+    if start_table is None:
+        return True
+    if start_table not in TABLE_ORDER:
+        raise ValueError(f'Unknown --start-table {start_table}; choose one of: {", ".join(TABLE_ORDER)}')
+    return TABLE_ORDER.index(table) >= TABLE_ORDER.index(start_table)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Run all Chapter 4.6 experiments in sequence.')
     parser.add_argument('--epochs', type=int, default=10)
@@ -136,7 +146,11 @@ def main():
     parser.add_argument('--continue-on-error', action='store_true')
     parser.add_argument('--skip-check-data', action='store_true')
     parser.add_argument('--skip-existing', action='store_true', help='skip rows that already have complete result files')
+    parser.add_argument('--start-table', default=None, help=f'start from this table, choices: {", ".join(TABLE_ORDER)}')
     args = parser.parse_args()
+
+    if args.start_table is not None and args.start_table not in TABLE_ORDER:
+        raise SystemExit(f'Unknown --start-table {args.start_table}; choose one of: {", ".join(TABLE_ORDER)}')
 
     run_id = dt.datetime.now().strftime('%Y%m%d-%H%M%S')
     run_dir = EXP_DIR / '_run_all'
@@ -158,6 +172,9 @@ def main():
         )
 
     for table, rows in ABLATION_TABLES:
+        if not should_run_table(table, args.start_table):
+            print(f'\n[{now()}] SKIP {table} before start-table {args.start_table}', flush=True)
+            continue
         for row in rows:
             if args.skip_existing and result_complete(table, row):
                 skip_command(f'{table} {row}', status_path)
@@ -182,6 +199,9 @@ def main():
         collect_table(table, log_path, status_path, args.continue_on_error)
 
     for table, dataset, metric_set in COMPARE_TABLES:
+        if not should_run_table(table, args.start_table):
+            print(f'\n[{now()}] SKIP {table} before start-table {args.start_table}', flush=True)
+            continue
         methods = [row for row in COMPARE_METHODS if not (args.skip_existing and result_complete(table, row))]
         if not methods:
             print(f'\n[{now()}] SKIP {table} compare {dataset} all metrics.json files exist', flush=True)
@@ -205,6 +225,14 @@ def main():
             cmd.extend(['--only'] + methods)
         stream_command(f'{table} compare {dataset}', cmd, log_path, status_path, args.continue_on_error)
         collect_table(table, log_path, status_path, args.continue_on_error)
+
+    if not should_run_table('4-21', args.start_table):
+        print(f'\n[{now()}] SKIP 4-21 before start-table {args.start_table}', flush=True)
+        print(f'\n[{now()}] all requested experiments finished')
+        print(f'log: {log_path}')
+        print(f'status: {status_path}')
+        print(f'table markdown files: {EXP_DIR}/<table>/table.md')
+        return
 
     for row in PROFILE_ROWS:
         if args.skip_existing and result_complete('4-21', row):
