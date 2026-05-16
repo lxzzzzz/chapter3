@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 
@@ -177,6 +178,17 @@ def remove_gt_sampling(cfg):
     ]
 
 
+def align_range_to_voxel_size(point_cloud_range, voxel_size):
+    aligned = [float(x) for x in point_cloud_range]
+    mins = aligned[:3]
+    maxs = aligned[3:6]
+    for axis, voxel in enumerate(voxel_size):
+        size = (maxs[axis] - mins[axis]) / float(voxel)
+        aligned_cells = int(np.ceil(size - 1e-6))
+        maxs[axis] = mins[axis] + aligned_cells * float(voxel)
+    return mins + maxs
+
+
 def limit_max_voxels(cfg, max_voxels=None):
     if max_voxels is None:
         return
@@ -231,10 +243,11 @@ def adapt_classes(cfg, classes):
 
 
 def adapt_dataset(cfg, spec, use_images):
+    point_cloud_range = align_range_to_voxel_size(spec.point_cloud_range, spec.voxel_size)
     data_cfg = cfg.setdefault('DATA_CONFIG', {})
     data_cfg['_BASE_CONFIG_'] = spec.fusion_base if use_images else spec.lidar_base
     data_cfg['DATA_PATH'] = spec.data_path
-    data_cfg['POINT_CLOUD_RANGE'] = spec.point_cloud_range
+    data_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
     data_cfg['INFO_PATH'] = deepcopy(spec.info_path)
     data_cfg['GET_ITEM_LIST'] = ['points', 'images', 'calib_matrices'] if use_images else ['points']
     for processor in data_cfg.get('DATA_PROCESSOR', []):
@@ -245,15 +258,15 @@ def adapt_dataset(cfg, spec, use_images):
         data_cfg['DEFAULT_CLASS_NAME'] = 'Car'
 
     model_cfg = cfg.setdefault('MODEL', {})
-    model_cfg['POINT_CLOUD_RANGE'] = spec.point_cloud_range
+    model_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
     model_cfg['VOXEL_SIZE'] = spec.voxel_size
     if model_cfg.get('BACKBONE_3D'):
-        model_cfg['BACKBONE_3D']['POINT_CLOUD_RANGE'] = spec.point_cloud_range
+        model_cfg['BACKBONE_3D']['POINT_CLOUD_RANGE'] = point_cloud_range
         model_cfg['BACKBONE_3D']['VOXEL_SIZE'] = spec.voxel_size
     dense = model_cfg.get('DENSE_HEAD', {})
     if dense.get('POST_PROCESSING'):
-        dense['POST_PROCESSING']['POST_CENTER_LIMIT_RANGE'] = spec.point_cloud_range
-        dense['POST_PROCESSING']['POST_CENTER_RANGE'] = spec.point_cloud_range
+        dense['POST_PROCESSING']['POST_CENTER_LIMIT_RANGE'] = point_cloud_range
+        dense['POST_PROCESSING']['POST_CENTER_RANGE'] = point_cloud_range
     model_cfg.setdefault('POST_PROCESSING', {})['EVAL_METRIC'] = 'kitti'
 
 
