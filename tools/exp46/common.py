@@ -189,6 +189,32 @@ def align_range_to_voxel_size(point_cloud_range, voxel_size):
     return mins + maxs
 
 
+def align_range_to_grid_multiple(point_cloud_range, voxel_size, grid_multiple):
+    aligned = align_range_to_voxel_size(point_cloud_range, voxel_size)
+    mins = aligned[:3]
+    maxs = aligned[3:6]
+    for axis in (0, 1):
+        voxel = float(voxel_size[axis])
+        cells = int(round((maxs[axis] - mins[axis]) / voxel))
+        aligned_cells = int(np.ceil(cells / float(grid_multiple)) * grid_multiple)
+        maxs[axis] = mins[axis] + aligned_cells * voxel
+    return mins + maxs
+
+
+def set_point_cloud_range(cfg, point_cloud_range):
+    data_cfg = cfg.setdefault('DATA_CONFIG', {})
+    data_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
+
+    model_cfg = cfg.setdefault('MODEL', {})
+    model_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
+    if model_cfg.get('BACKBONE_3D'):
+        model_cfg['BACKBONE_3D']['POINT_CLOUD_RANGE'] = point_cloud_range
+    dense = model_cfg.get('DENSE_HEAD', {})
+    if dense.get('POST_PROCESSING'):
+        dense['POST_PROCESSING']['POST_CENTER_LIMIT_RANGE'] = point_cloud_range
+        dense['POST_PROCESSING']['POST_CENTER_RANGE'] = point_cloud_range
+
+
 def limit_max_voxels(cfg, max_voxels=None):
     if max_voxels is None:
         return
@@ -247,7 +273,7 @@ def adapt_dataset(cfg, spec, use_images):
     data_cfg = cfg.setdefault('DATA_CONFIG', {})
     data_cfg['_BASE_CONFIG_'] = spec.fusion_base if use_images else spec.lidar_base
     data_cfg['DATA_PATH'] = spec.data_path
-    data_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
+    set_point_cloud_range(cfg, point_cloud_range)
     data_cfg['INFO_PATH'] = deepcopy(spec.info_path)
     data_cfg['GET_ITEM_LIST'] = ['points', 'images', 'calib_matrices'] if use_images else ['points']
     for processor in data_cfg.get('DATA_PROCESSOR', []):
@@ -258,15 +284,9 @@ def adapt_dataset(cfg, spec, use_images):
         data_cfg['DEFAULT_CLASS_NAME'] = 'Car'
 
     model_cfg = cfg.setdefault('MODEL', {})
-    model_cfg['POINT_CLOUD_RANGE'] = point_cloud_range
     model_cfg['VOXEL_SIZE'] = spec.voxel_size
     if model_cfg.get('BACKBONE_3D'):
-        model_cfg['BACKBONE_3D']['POINT_CLOUD_RANGE'] = point_cloud_range
         model_cfg['BACKBONE_3D']['VOXEL_SIZE'] = spec.voxel_size
-    dense = model_cfg.get('DENSE_HEAD', {})
-    if dense.get('POST_PROCESSING'):
-        dense['POST_PROCESSING']['POST_CENTER_LIMIT_RANGE'] = point_cloud_range
-        dense['POST_PROCESSING']['POST_CENTER_RANGE'] = point_cloud_range
     model_cfg.setdefault('POST_PROCESSING', {})['EVAL_METRIC'] = 'kitti'
 
 
@@ -336,6 +356,12 @@ def make_cfg(variant, dataset, epochs, row=None, max_voxels=None):
         for processor in cfg.get('DATA_CONFIG', {}).get('DATA_PROCESSOR', []):
             if processor.get('NAME') == 'transform_points_to_voxels':
                 processor['VOXEL_SIZE'] = [spec.voxel_size[0], spec.voxel_size[1], max(spec.point_cloud_range[5] - spec.point_cloud_range[2], 1.0)]
+                point_cloud_range = align_range_to_grid_multiple(
+                    spec.point_cloud_range,
+                    processor['VOXEL_SIZE'],
+                    grid_multiple=2,
+                )
+                set_point_cloud_range(cfg, point_cloud_range)
     elif variant == 'second':
         cfg = load_yaml('tools/cfgs/kitti_models/second.yaml')
         adapt_dataset(cfg, spec, use_images=False)
